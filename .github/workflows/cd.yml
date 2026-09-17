@@ -33,7 +33,7 @@ jobs:
       contents: read
       packages: write
     outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
+      image_tag: ${{ steps.deploy_tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,12 +64,24 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Select single deploy image tag
+        id: deploy_tag
+        run: |
+          TAG="$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | grep -m1 ':sha-')"
+          if [ -z "$TAG" ]; then
+            echo "::error::Could not find a deterministic sha-based tag in metadata-action output"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
   deploy:
     name: Deploy to Kubernetes
     runs-on: ubuntu-latest
     needs: build-and-push
     if: ${{ github.event.inputs.deploy == 'true' }}
     environment: production
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -77,9 +89,15 @@ jobs:
         uses: azure/setup-kubectl@v4
 
       - name: Configure kubeconfig
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
         run: |
+          if [ -z "$KUBE_CONFIG_DATA" ]; then
+            echo "::error::KUBE_CONFIG_DATA secret is not configured. Set it in repository settings before running a deployment."
+            exit 1
+          fi
           mkdir -p "$HOME/.kube"
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "$HOME/.kube/config"
+          echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
 
       - name: Set image and apply manifests
         run: |
