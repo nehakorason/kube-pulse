@@ -1,0 +1,44 @@
+# Requires the metrics-server to be installed in-cluster.
+# Thresholds documented in docs/observability.md.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kubepulse
+  namespace: kubepulse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kubepulse
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Kubernetes computes Resource-metric utilization as a percentage of
+          # the pod's CPU *request* (100m in deployment.yaml), not its 300m
+          # limit. So this actually targets 70m/pod average CPU, not 210m —
+          # leaving a 3x margin before pods hit their 300m limit and throttle.
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Lint, Format & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check app tests
+
+      - name: Format check (black)
+        run: black --check app tests
+
+      - name: Unit tests
+        run: pytest tests/unit -v --cov=app --cov-report=term-missing
+
+      - name: Integration tests
+        run: pytest tests/integration -v
+
+  validate-manifests:
+    name: Validate Kubernetes & Config Files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validators
+        run: pip install pyyaml
+
+      - name: Validate YAML syntax (k8s, monitoring, compose)
+        run: |
+          python3 - <<'EOF'
+          import glob
+          import sys
+          import yaml
+
+          failed = False
+          patterns = [
+              "k8s/*.yaml",
+              "monitoring/**/*.yml",
+              "monitoring/**/*.yaml",
+              "docker-compose.yml",
+              ".github/workflows/*.yml",
+          ]
+          files = set()
+          for p in patterns:
+              files.update(glob.glob(p, recursive=True))
+
+          for f in sorted(files):
+              try:
+                  list(yaml.safe_load_all(open(f)))
+                  print(f"OK: {f}")
+              except Exception as exc:  # noqa: BLE001
+                  print(f"FAIL: {f}: {exc}")
+                  failed = True
+
+          sys.exit(1 if failed else 0)
+          EOF
+
+      - name: Validate Grafana dashboard JSON
+        run: |
+          python3 - <<'EOF'
+          import json
+          json.load(open("monitoring/grafana/dashboards/kubepulse-overview.json"))
+          print("Grafana dashboard JSON valid")
+          EOF
+
+      - name: Set up kubeconform
+        uses: docker://ghcr.io/yannh/kubeconform:latest
+        continue-on-error: true
+        with:
+          args: -summary -ignore-missing-schemas k8s/namespace.yaml k8s/deployment.yaml k8s/service.yaml k8s/hpa.yaml k8s/configmap.yaml k8s/rbac.yaml k8s/pdb.yaml
+
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: kubepulse:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

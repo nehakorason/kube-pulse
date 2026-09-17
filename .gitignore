@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Env / secrets
+.env
+k8s/secret.yaml
+
+# Virtualenvs
+.venv/
+venv/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/cloud/.terraform/
+terraform/cloud/*.tfstate*
+
+# Load test output (the committed baseline_*.csv files are kept as
+# evidence; re-running scripts/load-test.sh will overwrite/add files here)
+load-testing/results/*.csv
+!load-testing/results/baseline_stats.csv
+!load-testing/results/baseline_stats_history.csv
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

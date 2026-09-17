@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubepulse
+  namespace: kubepulse
+  labels:
+    app: kubepulse
+automountServiceAccountToken: false
+---
+# Minimal RBAC: KubePulse's application code does not talk to the
+# Kubernetes API itself, so this Role intentionally grants read-only access
+# to its own namespace's pods only — useful for future self-inspection
+# features (e.g. an admin endpoint) without granting cluster-wide access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubepulse-pod-reader
+  namespace: kubepulse
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubepulse-pod-reader-binding
+  namespace: kubepulse
+subjects:
+  - kind: ServiceAccount
+    name: kubepulse
+    namespace: kubepulse
+roleRef:
+  kind: Role
+  name: kubepulse-pod-reader
+  apiGroup: rbac.authorization.k8s.io

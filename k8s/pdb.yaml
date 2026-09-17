@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kubepulse
+  namespace: kubepulse
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: kubepulse

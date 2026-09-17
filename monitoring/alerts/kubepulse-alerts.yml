@@ -1,0 +1,91 @@
+groups:
+  - name: kubepulse-application
+    rules:
+      - alert: KubePulseHighErrorRate
+        expr: >
+          (
+            sum(rate(kubepulse_http_errors_total[5m]))
+            /
+            sum(rate(kubepulse_http_requests_total[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "KubePulse error rate above 5%"
+          description: >
+            More than 5% of requests have resulted in HTTP 5xx responses over
+            the last 5 minutes. See docs/runbooks/01-high-error-rate.md.
+
+      - alert: KubePulseHighLatencyP95
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(kubepulse_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KubePulse P95 latency above 1s"
+          description: >
+            The 95th percentile request latency has exceeded 1 second for 5
+            minutes. See docs/runbooks/02-high-latency.md.
+
+      - alert: KubePulseServiceUnavailable
+        expr: up{job=~"kubepulse.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "KubePulse target is unreachable"
+          description: >
+            Prometheus has been unable to scrape the KubePulse /metrics
+            endpoint for 1 minute, indicating the service is down or
+            unreachable. See docs/runbooks/05-service-unavailable.md.
+
+  - name: kubepulse-kubernetes
+    rules:
+      - alert: KubePulsePodRestartAnomaly
+        expr: increase(kube_pod_container_status_restarts_total{namespace="kubepulse"}[15m]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KubePulse pod restarting repeatedly"
+          description: >
+            A KubePulse container has restarted more than 3 times in 15
+            minutes, suggesting a crash loop. See
+            docs/runbooks/03-pod-crashloop.md.
+
+      - alert: KubePulsePodUnavailable
+        expr: >
+          kube_deployment_status_replicas_available{namespace="kubepulse", deployment="kubepulse"}
+          <
+          kube_deployment_spec_replicas{namespace="kubepulse", deployment="kubepulse"}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "KubePulse has fewer available replicas than desired"
+          description: >
+            The KubePulse deployment has had fewer available replicas than
+            its spec for 5 minutes. See
+            docs/runbooks/05-service-unavailable.md.
+
+      - alert: KubePulseHighCPUSaturation
+        expr: >
+          avg(rate(container_cpu_usage_seconds_total{namespace="kubepulse", container="kubepulse"}[5m]))
+          /
+          avg(kube_pod_container_resource_limits{namespace="kubepulse", container="kubepulse", resource="cpu"})
+          > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KubePulse CPU utilisation above 85% of limit"
+          description: >
+            Average CPU utilisation across KubePulse pods has been above 85%
+            of the configured CPU limit for 5 minutes. Expect HPA scale-up;
+            if replicas are already at hpa.max, capacity may be exhausted.
+            See docs/runbooks/04-high-cpu.md and
+            docs/runbooks/06-hpa-not-scaling.md.
