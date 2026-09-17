@@ -59,7 +59,7 @@ User → Load Generator (Locust) → Kubernetes Service → Pods (FastAPI)
 | Terraform | Declarative, reproducible infra-as-code against the Kubernetes provider |
 | Prometheus + Grafana | De facto standard Kubernetes observability stack |
 | Locust | Python-native load generation, easy to script realistic mixed traffic |
-| GitHub Actions | Standard, free CI/CD for a public repository |
+| GitHub Actions | Native, git-integrated CI/CD with no separate service to configure |
 | pytest | Standard Python testing, supports both mocked unit tests and real-process integration tests |
 
 ## Repository structure
@@ -94,7 +94,7 @@ Optional, depending on what you want to run:
 ## Installation
 
 ```bash
-git clone <your-fork-url>
+git clone https://github.com/nehakorason/kube-pulse.git
 cd kube-pulse
 python3 -m pip install --break-system-packages -r requirements-dev.txt
 # or: make install
@@ -118,7 +118,7 @@ docker run --rm -p 8000:8000 kubepulse:local
 docker compose up --build -d
 # App:        http://localhost:8000
 # Prometheus: http://localhost:9090
-# Grafana:    http://localhost:3000  (user: admin / pass: admin, or anonymous Viewer access)
+# Grafana:    http://localhost:3000  (user: admin / pass: admin — local demo credentials only, do not reuse; anonymous Viewer access is also enabled)
 docker compose down -v
 ```
 
@@ -158,7 +158,7 @@ terraform apply
 
 ## Accessing Grafana
 
-**Via docker-compose**: open `http://localhost:3000` (admin/admin, or anonymous Viewer access is enabled). The "KubePulse Overview" dashboard is auto-provisioned from `monitoring/grafana/dashboards/kubepulse-overview.json`.
+**Via docker-compose**: open `http://localhost:3000` (admin/admin — local demo credentials only, do not reuse elsewhere; anonymous Viewer access is also enabled). The "KubePulse Overview" dashboard is auto-provisioned from `monitoring/grafana/dashboards/kubepulse-overview.json`.
 
 **Via Kubernetes**: install `kube-prometheus-stack` (or your own Prometheus/Grafana) and point it at `monitoring/prometheus/prometheus-k8s.yml` and `monitoring/grafana/dashboards/kubepulse-overview.json`; then:
 ```bash
@@ -201,25 +201,58 @@ docker compose down -v            # remove docker-compose stack
 kind delete cluster --name kubepulse
 ```
 
-## Environment limitations in this build
+## Validation & known limitations
 
-This project was built and validated in a network-restricted sandbox.
-Rather than stopping at "Docker/Kubernetes aren't available," the build
-process installed Docker (`apt-get install docker.io`) and ran it, built and
-ran the application container end-to-end (all 8 endpoints tested against a
-real running container, healthcheck verified, graceful shutdown verified),
-and stood up a real single-node Kubernetes control plane (k3s) that reached
-`Ready`. Actual pod scheduling in that specific sandbox is blocked by a
-deep, root-caused containerd/CRI incompatibility with the sandbox's nested
-kernel/cgroup setup — **not** a defect in KubePulse's own configuration.
+This project has been validated end-to-end on a real Windows 11 + Docker
+Desktop + `kind` environment — see
+[`docs/validation-report.md`](docs/validation-report.md) for the full,
+evidenced write-up and [`docs/experiments.md`](docs/experiments.md) for the
+detailed experiment-by-experiment results. In summary:
 
-The full, honest breakdown — what was actually executed with evidence, what
-was blocked and why (with the diagnostic steps taken to isolate the cause),
-and exact commands to complete validation on a normal machine — is in
-[`docs/validation-report.md`](docs/validation-report.md). See also
-[`docs/experiments.md`](docs/experiments.md) for load-test and failure-
-injection results, real where executed and clearly labelled
-`NOT EXECUTED — ENVIRONMENT LIMITATION` where not.
+- **Application**: 22/22 unit + integration tests pass; lint (`ruff`) and
+  format (`black`) checks are clean.
+- **Docker**: the production `Dockerfile` builds and runs correctly as a
+  non-root user, with all endpoints and the container `HEALTHCHECK`
+  verified against a real running container. (Graceful SIGTERM shutdown
+  timing was not separately measured.)
+- **Kubernetes**: a real `kind` cluster was created, the image loaded, and
+  `kubectl apply -k k8s/` deployed and rolled out successfully.
+- **Metrics Server / HPA**: real CPU-driven autoscaling was observed —
+  scale-up from 2 to 4 replicas under load, and scale-down back to 2 once
+  load stopped.
+- **Load testing**: the project's own Locust suite ran against the live
+  Kubernetes Service with 771 requests and 0 failures.
+- **Failure injection / recovery**: a deleted pod was automatically
+  replaced and became `Ready` in 6 seconds, with no observed Service
+  downtime.
+- **Prometheus & Grafana** (via `docker-compose`): both started healthy;
+  Prometheus correctly scraped and could query the app's own metrics and
+  loaded all alert rules; Grafana's provisioned datasource and dashboard
+  loaded correctly.
+- **Terraform**: `terraform fmt -check` and `terraform validate` both pass.
+- **GitHub Actions CI**: the `ci.yml` workflow (lint, format, tests,
+  manifest validation, Docker build) has run successfully on this
+  repository's default branch.
+
+**Known, currently-unresolved limitations:**
+- The `kubepulse-kubernetes` Prometheus alert group (pod-restart,
+  CPU-saturation, and replica-availability alerts) depends on
+  `kube-state-metrics`/cAdvisor metrics, which were not deployed in either
+  validation environment — these alert rules are syntactically valid and
+  load correctly, but have **not** been runtime-validated against real
+  firing conditions.
+- Driving `/api/v1/work` with a concentrated, adversarial CPU-saturation
+  load (well beyond this project's own normal traffic profile) can cause a
+  pod's liveness probe to fail and the container to be restarted, because
+  `/health` shares the same request thread pool and CPU budget as the
+  CPU-bound work handler. The project's own mixed-traffic Locust run
+  produced zero restarts under normal load. This is documented, not
+  fixed — see "Experiment 3b" in `docs/experiments.md` for the full
+  analysis and options considered.
+- A `DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated`
+  appears during tests — it originates from a third-party dependency
+  (`starlette`, pinned by the installed `fastapi` version), not from
+  KubePulse's own code, and has no functional impact.
 
 ## License
 
